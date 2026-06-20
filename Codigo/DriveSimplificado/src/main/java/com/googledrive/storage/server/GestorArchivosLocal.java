@@ -1,14 +1,14 @@
 package com.googledrive.storage.server;
 
 import java.io.*;
+import java.nio.file.Files;
 import java.security.MessageDigest;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public class GestorArchivosLocal {
     private static final String DIRECTORIO_BASE = "./storage_data/";
-    private static final int BUFFER_SIZE = 8192;
-    
+
     // mapa para guardar los locks de cada archivo y que no se pisen al escribir
     private static final ConcurrentHashMap<String, ReentrantReadWriteLock> fileLocks = new ConcurrentHashMap<>();
 
@@ -31,96 +31,55 @@ public class GestorArchivosLocal {
         return sb.toString();
     }
 
-    public String guardarArchivo(String nombreArchivo, InputStream redIn, long tamano) throws IOException {
-        ReentrantReadWriteLock lock = obtenerLock(nombreArchivo);
-        lock.writeLock().lock(); // bloqueamos para que nadie mas escriba aca (region critica)
-        
-        try (FileOutputStream fos = new FileOutputStream(DIRECTORIO_BASE + nombreArchivo);
-             BufferedOutputStream bos = new BufferedOutputStream(fos)) {
-            
-            MessageDigest md = MessageDigest.getInstance("MD5");
-            byte[] buffer = new byte[BUFFER_SIZE];
-            int bytesLeidos;
-            long totalLeido = 0;
-            
-            // pasamos los bytes directo y calculamos checksum
-            while (totalLeido < tamano && (bytesLeidos = redIn.read(buffer)) != -1) {
-                bos.write(buffer, 0, bytesLeidos);
-                md.update(buffer, 0, bytesLeidos);
-                totalLeido += bytesLeidos;
-            }
-            bos.flush();
-            return bytesToHex(md.digest());
+    private String md5(byte[] datos) {
+        try {
+            return bytesToHex(MessageDigest.getInstance("MD5").digest(datos));
         } catch (Exception e) {
-            throw new IOException("Fallo en guardado de archivo", e);
-        } finally {
-            lock.writeLock().unlock(); // soltamos el lock
+            throw new RuntimeException("Error al calcular MD5", e);
         }
     }
 
-    public String enviarArchivo(String nombreArchivo, OutputStream redOut) throws IOException {
+    public String guardarArchivo(String nombreArchivo, byte[] datos) throws IOException {
+        ReentrantReadWriteLock lock = obtenerLock(nombreArchivo);
+        lock.writeLock().lock(); // bloqueamos para que nadie mas escriba aca (region critica)
+        try (FileOutputStream fos = new FileOutputStream(DIRECTORIO_BASE + nombreArchivo)) {
+            fos.write(datos);
+            fos.flush();
+            return md5(datos);
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
+
+    public byte[] leerArchivo(String nombreArchivo) throws IOException {
         ReentrantReadWriteLock lock = obtenerLock(nombreArchivo);
         lock.readLock().lock(); // lock de lectura para que varios puedan leer a la vez
-        
-        File archivo = new File(DIRECTORIO_BASE + nombreArchivo);
-        if (!archivo.exists()) {
-            throw new FileNotFoundException("El archivo solicitado no existe en este nodo.");
-        }
-
-        try (FileInputStream fis = new FileInputStream(archivo);
-             BufferedInputStream bis = new BufferedInputStream(fis)) {
-            
-            MessageDigest md = MessageDigest.getInstance("MD5");
-            byte[] buffer = new byte[BUFFER_SIZE];
-            int bytesLeidos;
-            
-            while ((bytesLeidos = bis.read(buffer)) != -1) {
-                redOut.write(buffer, 0, bytesLeidos);
-                md.update(buffer, 0, bytesLeidos);
+        try {
+            File archivo = new File(DIRECTORIO_BASE + nombreArchivo);
+            if (!archivo.exists()) {
+                throw new FileNotFoundException("El archivo solicitado no existe en este nodo.");
             }
-            redOut.flush();
-            return bytesToHex(md.digest());
-        } catch (Exception e) {
-            throw new IOException("Fallo al enviar archivo", e);
+            return Files.readAllBytes(archivo.toPath());
         } finally {
             lock.readLock().unlock();
         }
     }
 
-    public String editarArchivo(String nombreArchivo, InputStream redIn, long tamano) throws IOException {
+    public String editarArchivo(String nombreArchivo, byte[] datos, String marcaLogica) throws IOException {
         ReentrantReadWriteLock lock = obtenerLock(nombreArchivo);
         lock.writeLock().lock(); // bloqueamos para escribir (region critica)
-        
-        // le ponemos true para que escriba al final del archivo y no borre lo que ya estaba
-        try (FileOutputStream fos = new FileOutputStream(DIRECTORIO_BASE + nombreArchivo, true);
-             BufferedOutputStream bos = new BufferedOutputStream(fos)) {
-            
-            MessageDigest md = MessageDigest.getInstance("MD5");
-            
-            // le mandamos la hora del server apenas entra al lock
-            // asi queda guardado el orden real en el que entraron las ediciones
-            String timestamp = "[" + java.time.LocalTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss.SSS")) + "] ";
-            bos.write(timestamp.getBytes());
-
-            byte[] buffer = new byte[BUFFER_SIZE];
-            int bytesLeidos;
-            long totalLeido = 0;
-            
-            while (totalLeido < tamano && (bytesLeidos = redIn.read(buffer)) != -1) {
-                bos.write(buffer, 0, bytesLeidos);
-                md.update(buffer, 0, bytesLeidos);
-                totalLeido += bytesLeidos;
-            }
-            // un enter para que no quede todo en la misma linea
-            byte[] newline = "\n".getBytes();
-            bos.write(newline);
-            bos.flush();
-            
-            return bytesToHex(md.digest());
-        } catch (Exception e) {
-            throw new IOException("Fallo en edicion de archivo", e);
+        // append (true) para no borrar lo que ya estaba
+        try (FileOutputStream fos = new FileOutputStream(DIRECTORIO_BASE + nombreArchivo, true)) {
+            // Escribimos la marca lógica de Lamport asignada al entrar a la sección
+            // crítica. El orden de las ediciones queda definido por el reloj lógico
+            // (no por la hora física), demostrando ordenamiento causal sin reloj global.
+            fos.write((marcaLogica + " ").getBytes());
+            fos.write(datos);
+            fos.write("\n".getBytes());
+            fos.flush();
+            return md5(datos);
         } finally {
-            lock.writeLock().unlock(); // soltamos el lock
+            lock.writeLock().unlock();
         }
     }
 }

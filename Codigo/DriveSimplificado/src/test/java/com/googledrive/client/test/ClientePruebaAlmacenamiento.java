@@ -24,11 +24,9 @@ public class ClientePruebaAlmacenamiento {
         
         // Se utiliza try-with-resources para garantizar el cierre del Socket seguro
         try (Socket socket = ssf.createSocket(HOST, PUERTO);
-             OutputStream out = socket.getOutputStream();
-             InputStream in = socket.getInputStream();
              // El ObjectOutputStream debe inicializarse ANTES que el ObjectInputStream para evitar bloqueos
-             ObjectOutputStream oos = new ObjectOutputStream(out);
-             ObjectInputStream ois = new ObjectInputStream(in)) {
+             ObjectOutputStream oos = new ObjectOutputStream(socket.getOutputStream());
+             ObjectInputStream ois = new ObjectInputStream(socket.getInputStream())) {
 
             // 1. Generar un archivo simulado en memoria
             String contenidoSimulado = "Este es un flujo de bytes de prueba para el sistema distribuido. Archivo generado correctamente.";
@@ -42,16 +40,19 @@ public class ClientePruebaAlmacenamiento {
             PeticionArchivo peticion = new PeticionArchivo(
                 PeticionArchivo.Operacion.SUBIR, 
                 nombreArchivo, 
-                bytesArchivo.length
+                bytesArchivo.length,
+                1,
+                "cliente-prueba"
             );
             peticion.setChecksum(md5);
             
             oos.writeObject(peticion);
             oos.flush();
 
-            // 3. Transmisión de Datos Binarios
-            out.write(bytesArchivo);
-            out.flush();
+            // 3. Transmisión de Datos Binarios (payload con longitud prefijada)
+            oos.writeInt(bytesArchivo.length);
+            oos.write(bytesArchivo);
+            oos.flush();
 
             // 4. Recepción de Confirmación
             String respuestaServidor = ois.readUTF();
