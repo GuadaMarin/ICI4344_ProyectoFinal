@@ -5,7 +5,7 @@ import java.io.Serializable;
 public class MensajeCoordinacion implements Serializable {
     private static final long serialVersionUID = 1L;
 
-    public enum Tipo { SOLICITUD_ACCESO, PERMISO_CONCEDIDO }
+    public enum Tipo { SOLICITUD_ACCESO, PERMISO_CONCEDIDO, LATIDO, DERRIBAR }
 
     private Tipo tipo;
     private int tiempoLamport;
