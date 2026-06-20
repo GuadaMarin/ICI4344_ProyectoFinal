@@ -6,11 +6,15 @@ import com.googledrive.core.utils.Utils;
 import javax.net.ssl.SSLSocketFactory;
 import java.io.*;
 import java.net.Socket;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class ClientePruebaSincronizacion {
     private static final String HOST = "127.0.0.1";
     private static final int PUERTO = 9000;
     private static final String ARCHIVO_SYNC = "documento_compartido.txt";
+
+    // Reloj lógico del cliente: cada edición lleva su propia marca de Lamport.
+    private static final AtomicInteger relojCliente = new AtomicInteger(0);
 
     public static void main(String[] args) {
         System.setProperty("javax.net.ssl.trustStore", "keystore.jks");
@@ -54,43 +58,40 @@ public class ClientePruebaSincronizacion {
         SSLSocketFactory ssf = (SSLSocketFactory) SSLSocketFactory.getDefault();
 
         try (Socket socket = ssf.createSocket(HOST, PUERTO);
-                OutputStream out = socket.getOutputStream();
-                InputStream in = socket.getInputStream();
-                ObjectOutputStream oos = new ObjectOutputStream(out);
-                ObjectInputStream ois = new ObjectInputStream(in)) {
+                ObjectOutputStream oos = new ObjectOutputStream(socket.getOutputStream());
+                ObjectInputStream ois = new ObjectInputStream(socket.getInputStream())) {
 
             byte[] bytesAporte = textoAgregar.getBytes();
             String md5 = Utils.calcularChecksum(bytesAporte);
 
             System.out.println("[" + nombreUsuario + "] Conectado de forma segura. Enviando edición...");
 
-            // mandamos la peticion con el enum EDITAR y el checksum
+            // mandamos la peticion con el enum EDITAR, el checksum y la marca de Lamport
             PeticionArchivo peticion = new PeticionArchivo(
                     PeticionArchivo.Operacion.EDITAR,
                     ARCHIVO_SYNC,
-                    bytesAporte.length);
+                    bytesAporte.length,
+                    relojCliente.incrementAndGet(),
+                    nombreUsuario);
             peticion.setChecksum(md5);
             oos.writeObject(peticion);
             oos.flush();
 
-            // mandamos el texto en bytes
-            out.write(bytesAporte);
-            out.flush();
+            // mandamos el texto en bytes (payload con longitud prefijada)
+            oos.writeInt(bytesAporte.length);
+            oos.write(bytesAporte);
+            oos.flush();
 
             // esperamos la respuesta del server
             String confirmacion = ois.readUTF();
             System.out.println("[" + nombreUsuario + "] Servidor responde: " + confirmacion);
 
-            // aca leemos todo el archivo de vuelta para ver como quedo despues de editarlo
-            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-            byte[] buf = new byte[8192];
-            int leidos;
-            // el read() se queda pegado hasta que el server corta la conexion, asi leemos todo de una
-            while ((leidos = in.read(buf)) != -1) {
-                buffer.write(buf, 0, leidos);
-            }
+            // leemos el estado completo del documento devuelto por el servidor
+            int longitud = ois.readInt();
+            byte[] buffer = new byte[longitud];
+            ois.readFully(buffer);
 
-            String estadoFinal = new String(buffer.toByteArray());
+            String estadoFinal = new String(buffer);
             System.out.println("\n--- ESTADO DEL DOCUMENTO VISTO POR [" + nombreUsuario + "] ---\n" + estadoFinal
                     + "--------------------------------------------------------\n");
 
