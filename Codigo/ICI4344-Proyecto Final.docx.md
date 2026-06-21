@@ -128,7 +128,9 @@ El protocolo funciona por archivo y mantiene tres estados (`LIBERADO`, `BUSCANDO
 
 En un sistema distribuido los fallos son parciales: algunos componentes pueden fallar mientras otros siguen funcionando con normalidad. Se denominan independientes porque la caída de un computador o la terminación inesperada de un programa no se comunica de manera inmediata a los demás componentes con los que interactúa. Por lo tanto, cada componente debe ser capaz de fallar por sí solo sin que todo el sistema colapse. 
 
-El modelo de fallos del sistema contempla tres situaciones principales: la caída de un nodo (fallo *crash*), la pérdida de mensajes de coordinación (fallo de omisión) y la posible corrupción de datos durante la transferencia. La detección se apoya en *timeouts*: cada socket de cliente se configura con `setSoTimeout(30000)`, de modo que una conexión lenta o abandonada no acapara un hilo indefinidamente. En cuanto a la caída abrupta de un cliente, `WorkerCliente` captura las excepciones `SocketException`, `EOFException` y `SocketTimeoutException`; independientemente del tipo de interrupción, el bloque `finally` garantiza que el socket se cierre correctamente, evitando que el hilo quede bloqueado y que se produzcan fugas de recursos en el nodo. Frente a la caída de un nodo par, el método `enviarMensajeA` de `ServicioExclusionMutua` captura la `IOException` al no poder conectarse y continúa la ejecución marcando al nodo como inalcanzable, de modo que la coordinación no se detiene por completo ante la indisponibilidad de un par.
+El modelo de fallos del sistema contempla tres situaciones principales: la caída de un nodo (fallo *crash*), la pérdida de mensajes de coordinación (fallo de omisión) y la posible corrupción de datos durante la transferencia. La detección combina *heartbeats* y *timeouts*. Cada nodo ejecuta un detector de fallos (`DetectorFallos`) que envía latidos periódicos (cada 1 s) a sus pares por el puerto de coordinación y mantiene el conjunto de nodos vivos; si un par deja de responder durante tres intervalos se le declara caído. Además, cada socket de cliente se configura con `setSoTimeout(30000)`, de modo que una conexión lenta o abandonada no acapara un hilo indefinidamente. En cuanto a la caída abrupta de un cliente, `WorkerCliente` captura las excepciones `SocketException`, `EOFException` y `SocketTimeoutException`; el bloque `finally` garantiza que el socket se cierre correctamente, evitando fugas de recursos.
+
+La recuperación se basa en la reconfiguración dinámica de la membresía: cuando un nodo cae, el algoritmo de exclusión mutua deja de exigir su permiso y continúa coordinándose solo con los nodos vivos, por lo que el servicio no se detiene. Para tolerar la omisión (pérdida de un permiso por saturación de la red), el solicitante retransmite periódicamente su solicitud a los nodos vivos que aún no han concedido, y el conteo de permisos se lleva con un conjunto idempotente de nodos para que una retransmisión nunca produzca un acceso prematuro que viole la exclusión mutua.
 
 Respecto a la integridad de los datos transferidos, el sistema calcula el *hash* MD5 del flujo de bytes antes del envío utilizando la clase `Utils`, y ese valor se incluye junto con los datos en el objeto `PeticionArchivo`. Al recibirlos, `WorkerCliente` (a través de `GestorArchivosLocal`) verifica que el *hash* calculado en destino coincida con el enviado por el cliente, y si existe alguna diferencia, la operación se rechaza de manera controlada, asegurando que ningún archivo quede guardado con contenido corrupto o incompleto incluso si hubo pérdidas durante el tránsito.
 
@@ -215,7 +217,8 @@ Como se mencionó en la Sección 2.4, los nodos y los canales pueden fallar de f
 | Tipo de fallo | Detección | Recuperación |
 | :---- | :---- | :---- |
 | Caída de cliente (crash) | `SocketTimeoutException` por `setSoTimeout(30000)` | Cierre ordenado del socket en `finally` y liberación del hilo |
-| Caída de un nodo par (crash) | `IOException` al intentar conectar en `enviarMensajeA` | El nodo se marca como inalcanzable; los nodos restantes siguen operando |
+| Caída de un nodo par (crash) | Ausencia de *heartbeats* (`DetectorFallos`) y `IOException` en `enviarMensajeA` | Reconfiguración de la membresía: la exclusión mutua deja de exigir el permiso del nodo caído y los nodos vivos siguen operando |
+| Pérdida de un mensaje de coordinación (omisión) | El permiso no llega y el nodo sigue vivo según *heartbeats* | Retransmisión periódica de la solicitud; conteo idempotente de permisos por conjunto de nodos |
 | Pérdida/corrupción de datos (omisión) | Comparación de *checksum* MD5 en destino | Rechazo controlado de la operación; el archivo no se persiste corrupto |
 
 ## **4.3 Lectura de la prueba de tráfico** {#4.3-lectura-de-la-prueba-de-tráfico}
@@ -229,7 +232,28 @@ Las métricas recolectadas y su interpretación son las siguientes:
 * **Mensajes de coordinación:** el algoritmo de Ricart y Agrawala genera, por cada entrada a la sección crítica, `2·(N − 1)` mensajes (una `SOLICITUD_ACCESO` y un `PERMISO_CONCEDIDO` hacia y desde cada uno de los otros nodos). Con `N = 3`, esto equivale a 4 mensajes por acceso, magnitud que permite estimar el sobrecosto de coordinación a partir del número de operaciones de escritura.
 * **Tasa de error o de pérdida:** proporción de operaciones fallidas o rechazadas por *checksum*, medida tanto en régimen normal como durante la caída de un nodo.
 
-Durante la prueba se induce una falla derribando a propósito uno de los nodos activos. Gracias al manejo de `IOException` en `enviarMensajeA` y a los *timeouts* de socket, el sistema marca al nodo caído como inalcanzable y los nodos sobrevivientes continúan atendiendo clientes y coordinándose entre sí; se mide cuánto se degradan transitoriamente la latencia (por los *timeouts* en los intentos de contacto con el nodo caído) y la tasa de error, y cuánto tarda el sistema en estabilizarse. Los *logs* de la corrida registran las marcas de Lamport, las decisiones de diferir o conceder el acceso (`[Ricart-Agrawala] ... DIFIERE a ...`, entradas y salidas de la sección crítica) y la detección de la falla, y se adjuntan a la entrega como evidencia junto con la tabla y el gráfico de resultados.
+Durante la prueba se induce una falla derribando a propósito uno de los nodos activos (`nodo2`) en torno al segundo 30. Gracias al detector de fallos por *heartbeats*, a los *timeouts* de socket y al manejo de `IOException` en `enviarMensajeA`, el sistema marca al nodo caído como inalcanzable (reconfiguración de la membresía) y los nodos sobrevivientes continúan atendiendo clientes y coordinándose entre sí; el cliente, además, redirige el tráfico hacia los nodos vivos (*failover*). Los *logs* de la corrida registran las marcas de Lamport, las decisiones de diferir o conceder el acceso (`[Ricart-Agrawala] ... DIFIERE a ...`, entradas y salidas de la sección crítica) y la detección de la falla; se adjuntan a la entrega como evidencia junto con la tabla y el gráfico de resultados.
+
+**Resultados obtenidos.** La siguiente tabla resume una corrida real de 50 hilos durante 60 segundos sobre los tres nodos, con falla inducida de `nodo2` en el segundo 30 (los archivos completos están en `Codigo/DriveSimplificado/resultados_carga/`):
+
+| Métrica | Valor |
+| :---- | :---- |
+| Hilos concurrentes | 50 |
+| Duración | 60 s |
+| Operaciones exitosas | 25.838 |
+| Throughput | ≈ 430 ops/seg |
+| Latencia promedio | ≈ 116 ms |
+| Latencia mediana (p50) | ≈ 97 ms |
+| Latencia p95 | ≈ 149 ms |
+| Latencia máxima | ≈ 3.137 ms |
+| Tasa de error (con *failover*) | 0,00 % |
+| Mensajes de coordinación (Ricart-Agrawala) | ≈ 62.900 en total entre los tres nodos |
+| Entradas/salidas de sección crítica | iguales en cada nodo (sin bloqueos): nodo1 7.340/7.340, nodo3 11.077/11.077 |
+| Solicitudes diferidas (contención) | nodo1 2.171, nodo3 1.556 |
+
+![Throughput por segundo de la prueba de tráfico, con la caída a cero en la falla inducida y la recuperación posterior.](DriveSimplificado/resultados_carga/grafico_throughput.png)
+
+**Lectura de las métricas.** El throughput sostenido de ≈ 430 ops/seg con una latencia p95 de 149 ms (cercana al promedio de 116 ms) indica que el sistema responde de forma estable y que la cola de peticiones que espera el permiso de la sección crítica se mantiene acotada. El que las entradas y salidas de la sección crítica coincidan exactamente en cada nodo confirma que la exclusión mutua de Ricart y Agrawala es correcta: nunca queda una sección crítica tomada sin liberar. Los ≈ 62.900 mensajes de coordinación son coherentes con el costo teórico de `2·(N − 1)` mensajes por acceso más las retransmisiones ante pérdidas. Respecto a la falla inducida, el gráfico muestra que el throughput cae a cero durante aproximadamente dos segundos (el tiempo que tarda el detector de *heartbeats* en declarar muerto a `nodo2`, con umbral de 3 s) y luego se recupera por completo, mientras que la tasa de error final es del 0 % gracias al *failover* del cliente hacia los nodos vivos. Esto evidencia una recuperación efectiva: la caída de un nodo degrada el servicio solo de forma transitoria y no lo detiene.
 
 5. # **CONCLUSIÓN**  {#conclusión}
 
@@ -239,7 +263,7 @@ Se demostró que una arquitectura de varios servidores, sin un coordinador centr
 
 El ordenamiento de eventos sin un reloj global se resolvió con relojes lógicos de Lamport, que proporcionan el orden total necesario para que el algoritmo de exclusión mutua distribuida de Ricart y Agrawala coordine de forma verificable el acceso al recurso crítico compartido. Esta combinación es la que distingue al proyecto del esquema cliente-servidor del parcial y la que evidencia los conceptos centrales del curso.
 
-Otro aspecto importante fue la elaboración de una matriz de fallos que anticipa los escenarios de *crash* y de omisión. Al integrar la detección basada en *timeouts* y en el manejo de excepciones de red, junto con la validación de integridad por *checksum* MD5, el sistema evidenció una alta resiliencia, evitando que la caída de un nodo o una interrupción del canal colapsara el servicio.
+Otro aspecto importante fue la elaboración de una matriz de fallos que anticipa los escenarios de *crash* y de omisión. Al integrar la detección por *heartbeats* y *timeouts*, la reconfiguración dinámica de la membresía y la retransmisión de solicitudes, junto con la validación de integridad por *checksum* MD5, el sistema evidenció una alta resiliencia. La prueba de tráfico con falla inducida lo confirmó: al derribar un nodo en plena carga, el throughput cayó solo durante unos dos segundos y luego se recuperó por completo, con una tasa de error final del 0 %, sin que el servicio colapsara.
 
 Por otra parte, se destaca el cumplimiento del objetivo de ocultar la complejidad de la distribución al usuario final: mediante las transparencias de acceso y de ubicación, la interacción con los recursos remotos resulta idéntica a la de un sistema de archivos local, pese a la coordinación entre nodos que ocurre en segundo plano.
 
