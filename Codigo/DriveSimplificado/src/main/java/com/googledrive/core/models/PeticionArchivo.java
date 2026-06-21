@@ -11,6 +11,7 @@ public class PeticionArchivo implements Serializable {
     private String nombreArchivo;
     private long tamanoBytes;
     private String checksum; // Para validación de integridad
+    private byte[] contenido; // Carga útil serializada junto a la petición (marshalling)
     
     // Agregado para el proyecto final (Relojes Lamport y Origen)
     private int timestampLamport;
@@ -36,6 +37,9 @@ public class PeticionArchivo implements Serializable {
     
     public String getChecksum() { return checksum; }
     public void setChecksum(String checksum) { this.checksum = checksum; }
+
+    public byte[] getContenido() { return contenido; }
+    public void setContenido(byte[] contenido) { this.contenido = contenido; }
 
     public int getTimestampLamport() { return timestampLamport; }
     public void setTimestampLamport(int timestampLamport) { this.timestampLamport = timestampLamport; }

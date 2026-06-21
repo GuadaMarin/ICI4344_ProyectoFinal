@@ -58,32 +58,45 @@ public class GestorArchivosLocal {
         }
     }
 
+    // Variante que recibe el contenido ya deserializado (marshalling vía objeto), evitando
+    // mezclar ObjectInputStream con lecturas crudas del socket.
+    public String guardarArchivo(String nombreArchivo, byte[] datos) throws IOException {
+        try (InputStream entrada = new ByteArrayInputStream(datos)) {
+            return guardarArchivo(nombreArchivo, entrada, datos.length);
+        }
+    }
+
+    public String editarArchivo(String nombreArchivo, byte[] datos) throws IOException {
+        try (InputStream entrada = new ByteArrayInputStream(datos)) {
+            return editarArchivo(nombreArchivo, entrada, datos.length);
+        }
+    }
+
     public String enviarArchivo(String nombreArchivo, OutputStream redOut) throws IOException {
         ReentrantReadWriteLock lock = obtenerLock(nombreArchivo);
-        lock.readLock().lock(); // lock de lectura para que varios puedan leer a la vez
-        
-        File archivo = new File(DIRECTORIO_BASE + nombreArchivo);
-        if (!archivo.exists()) {
-            throw new FileNotFoundException("El archivo solicitado no existe en este nodo.");
+
+        // Leemos el archivo a memoria SOLO mientras se mantiene el lock de lectura (operación local y rápida);
+        // el envío por red, que puede ser lento, se realiza FUERA del lock para no bloquear a los escritores.
+        byte[] datos;
+        lock.readLock().lock();
+        try {
+            File archivo = new File(DIRECTORIO_BASE + nombreArchivo);
+            if (!archivo.exists()) {
+                throw new FileNotFoundException("El archivo solicitado no existe en este nodo.");
+            }
+            datos = java.nio.file.Files.readAllBytes(archivo.toPath());
+        } finally {
+            lock.readLock().unlock();
         }
 
-        try (FileInputStream fis = new FileInputStream(archivo);
-             BufferedInputStream bis = new BufferedInputStream(fis)) {
-            
+        try {
             MessageDigest md = MessageDigest.getInstance("MD5");
-            byte[] buffer = new byte[BUFFER_SIZE];
-            int bytesLeidos;
-            
-            while ((bytesLeidos = bis.read(buffer)) != -1) {
-                redOut.write(buffer, 0, bytesLeidos);
-                md.update(buffer, 0, bytesLeidos);
-            }
+            redOut.write(datos);
             redOut.flush();
+            md.update(datos);
             return bytesToHex(md.digest());
         } catch (Exception e) {
             throw new IOException("Fallo al enviar archivo", e);
-        } finally {
-            lock.readLock().unlock();
         }
     }
 
