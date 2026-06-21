@@ -34,7 +34,8 @@ public class WorkerCliente implements Runnable {
                 // Pedimos acceso a la red antes de modificar el disco
                 servicioExclusionMutua.solicitarAccesoCritico(peticion.getNombreArchivo());
                 try {
-                    String hashCalculado = gestorDelDiscoLocal.guardarArchivo(peticion.getNombreArchivo(), in, peticion.getTamanoBytes());
+                    byte[] datos = peticion.getContenido() != null ? peticion.getContenido() : new byte[0];
+                    String hashCalculado = gestorDelDiscoLocal.guardarArchivo(peticion.getNombreArchivo(), datos);
                     if (peticion.getChecksum() != null && !peticion.getChecksum().equals(hashCalculado)) {
                         oos.writeUTF("ERROR: Archivo corrupto tras transmisión. MD5 no coincide.");
                     } else {
@@ -53,14 +54,13 @@ public class WorkerCliente implements Runnable {
                 
                 servicioExclusionMutua.solicitarAccesoCritico(peticion.getNombreArchivo());
                 try {
-                    String hashCalculado = gestorDelDiscoLocal.editarArchivo(peticion.getNombreArchivo(), in, peticion.getTamanoBytes());
+                    byte[] datos = peticion.getContenido() != null ? peticion.getContenido() : new byte[0];
+                    String hashCalculado = gestorDelDiscoLocal.editarArchivo(peticion.getNombreArchivo(), datos);
                     if (peticion.getChecksum() != null && !peticion.getChecksum().equals(hashCalculado)) {
                         oos.writeUTF("ERROR: Edición corrupta (MD5 fail).");
                     } else {
                         oos.writeUTF("ÉXITO: Archivo editado.");
                     }
-                    oos.flush();
-                    gestorDelDiscoLocal.enviarArchivo(peticion.getNombreArchivo(), out);
                 } finally {
                     servicioExclusionMutua.liberarAccesoCritico(peticion.getNombreArchivo());
                 }

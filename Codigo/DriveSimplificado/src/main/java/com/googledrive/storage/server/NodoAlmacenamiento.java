@@ -33,6 +33,9 @@ public class NodoAlmacenamiento {
         // Levantar servicio para coordinación entre nodos
         servicioCoordinacion.iniciarEscuchaCoordinacion();
 
+        // Reporte periódico de métricas de coordinación (evidencia para la prueba de tráfico).
+        iniciarReporteMetricas();
+
         ExecutorService piscinaDeHilos = Executors.newFixedThreadPool(HILOS_MAXIMOS);
         
         try {
@@ -52,6 +55,32 @@ public class NodoAlmacenamiento {
         } finally {
             piscinaDeHilos.shutdown();
         }
+    }
+
+    private void iniciarReporteMetricas() {
+        Thread reportero = new Thread(() -> {
+            while (servidorEncendido) {
+                try {
+                    Thread.sleep(15000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                System.out.println("[Métricas] " + idNodoLocal
+                        + " | mensajes coordinación (Ricart-Agrawala) = " + servicioCoordinacion.getMensajesCoordinacion()
+                        + " | heartbeats enviados = " + servicioCoordinacion.getDetectorFallos().getHeartbeatsEnviados()
+                        + " | reloj Lamport = " + relojLogico.obtenerTiempo()
+                        + " | nodos vivos = " + servicioCoordinacion.getDetectorFallos().nodosVivos());
+            }
+        }, "metricas-" + idNodoLocal);
+        reportero.setDaemon(true);
+        reportero.start();
+
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> System.out.println(
+                "[Métricas-FINAL] " + idNodoLocal
+                        + " | mensajes coordinación = " + servicioCoordinacion.getMensajesCoordinacion()
+                        + " | heartbeats = " + servicioCoordinacion.getDetectorFallos().getHeartbeatsEnviados()
+                        + " | reloj Lamport = " + relojLogico.obtenerTiempo())));
     }
 
     public static void main(String[] args) {

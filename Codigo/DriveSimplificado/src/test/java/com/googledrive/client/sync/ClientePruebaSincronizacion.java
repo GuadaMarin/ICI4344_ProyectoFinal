@@ -64,38 +64,50 @@ public class ClientePruebaSincronizacion {
 
             System.out.println("[" + nombreUsuario + "] Conectado de forma segura. Enviando edición...");
 
-            // mandamos la peticion con el enum EDITAR y el checksum
+            // mandamos la peticion EDITAR con el contenido serializado junto a la petición
             PeticionArchivo peticion = new PeticionArchivo(
                     PeticionArchivo.Operacion.EDITAR,
                     ARCHIVO_SYNC,
                     bytesAporte.length);
             peticion.setChecksum(md5);
+            peticion.setContenido(bytesAporte);
             oos.writeObject(peticion);
             oos.flush();
 
-            // mandamos el texto en bytes
-            out.write(bytesAporte);
-            out.flush();
-
-            // esperamos la respuesta del server
+            // esperamos la confirmación del server
             String confirmacion = ois.readUTF();
             System.out.println("[" + nombreUsuario + "] Servidor responde: " + confirmacion);
 
-            // aca leemos todo el archivo de vuelta para ver como quedo despues de editarlo
+        } catch (IOException e) {
+            System.err.println("[" + nombreUsuario + "] Fallo en la conexión: " + e.getMessage());
+            return;
+        }
+
+        // descargamos el documento (operación de lectura) para ver cómo quedó tras la edición
+        String estadoFinal = descargarDocumento();
+        System.out.println("\n--- ESTADO DEL DOCUMENTO VISTO POR [" + nombreUsuario + "] ---\n" + estadoFinal
+                + "--------------------------------------------------------\n");
+    }
+
+    private static String descargarDocumento() {
+        SSLSocketFactory ssf = (SSLSocketFactory) SSLSocketFactory.getDefault();
+        try (Socket socket = ssf.createSocket(HOST, PUERTO);
+                OutputStream out = socket.getOutputStream();
+                InputStream in = socket.getInputStream();
+                ObjectOutputStream oos = new ObjectOutputStream(out)) {
+
+            oos.writeObject(new PeticionArchivo(PeticionArchivo.Operacion.DESCARGAR, ARCHIVO_SYNC, 0));
+            oos.flush();
+
             ByteArrayOutputStream buffer = new ByteArrayOutputStream();
             byte[] buf = new byte[8192];
             int leidos;
-            // el read() se queda pegado hasta que el server corta la conexion, asi leemos todo de una
             while ((leidos = in.read(buf)) != -1) {
                 buffer.write(buf, 0, leidos);
             }
-
-            String estadoFinal = new String(buffer.toByteArray());
-            System.out.println("\n--- ESTADO DEL DOCUMENTO VISTO POR [" + nombreUsuario + "] ---\n" + estadoFinal
-                    + "--------------------------------------------------------\n");
-
+            return new String(buffer.toByteArray());
         } catch (IOException e) {
-            System.err.println("[" + nombreUsuario + "] Fallo en la conexión: " + e.getMessage());
+            return "(no se pudo descargar el documento: " + e.getMessage() + ")\n";
         }
     }
 }

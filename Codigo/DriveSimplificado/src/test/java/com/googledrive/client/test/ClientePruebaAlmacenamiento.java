@@ -45,15 +45,12 @@ public class ClientePruebaAlmacenamiento {
                 bytesArchivo.length
             );
             peticion.setChecksum(md5);
-            
+            peticion.setContenido(bytesArchivo); // El contenido viaja serializado junto a la petición
+
             oos.writeObject(peticion);
             oos.flush();
 
-            // 3. Transmisión de Datos Binarios
-            out.write(bytesArchivo);
-            out.flush();
-
-            // 4. Recepción de Confirmación
+            // 3. Recepción de Confirmación
             String respuestaServidor = ois.readUTF();
             System.out.println("Respuesta del servidor: " + respuestaServidor);
 
