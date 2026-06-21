@@ -1,0 +1,14 @@
+==================== RESULTADOS DE LA PRUEBA DE TRÁFICO ====================
+Hilos concurrentes:        50
+Duración objetivo:         60 s (real: 60.1 s)
+Operaciones exitosas:      25838
+Operaciones con error:     0
+Throughput:                429.68 ops/seg
+Latencia promedio:         115.55 ms
+Latencia mediana (p50):    97 ms
+Latencia p95:              149 ms
+Latencia máxima:           3137 ms
+Tasa de error:             0.00 %
+Nota: la cantidad de mensajes de coordinación (Ricart-Agrawala) y de
+heartbeats se obtiene de las líneas [Métricas] / [Métricas-FINAL] de cada nodo.
+===========================================================================

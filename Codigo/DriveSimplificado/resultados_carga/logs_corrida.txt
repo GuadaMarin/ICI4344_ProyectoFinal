@@ -1,0 +1,47 @@
+===================================================================
+ EVIDENCIA DE LA PRUEBA DE TRÁFICO - Sistema Drive Distribuido
+ 3 nodos | 50 hilos | 60 s | falla inducida (nodo2) en t~30s
+===================================================================
+
+----- MÉTRICAS FINALES POR NODO -----
+[Métricas] nodo1 | mensajes coordinación (Ricart-Agrawala) = 25558 | heartbeats enviados = 199 | reloj Lamport = 104888 | nodos vivos = [nodo3]
+[Métricas] nodo2 | mensajes coordinación (Ricart-Agrawala) = 11715 | heartbeats enviados = 91 | reloj Lamport = 43399 | nodos vivos = [nodo3, nodo1]
+[Métricas] nodo3 | mensajes coordinación (Ricart-Agrawala) = 25632 | heartbeats enviados = 201 | reloj Lamport = 104886 | nodos vivos = [nodo1]
+
+----- RELOJES DE LAMPORT Y EXCLUSIÓN MUTUA (muestra nodo1) -----
+[138] ---> Nodo nodo1 ENTRA a (documento_compartido.txt)
+[154] ---> Nodo nodo1 ENTRA a (carga_24.dat)
+[155] <--- Nodo nodo1 SALE de (carga_24.dat)
+[157] <--- Nodo nodo1 SALE de (documento_compartido.txt)
+[176] ---> Nodo nodo1 ENTRA a (carga_21.dat)
+[177] <--- Nodo nodo1 SALE de (carga_21.dat)
+[180] ---> Nodo nodo1 ENTRA a (carga_17.dat)
+[181] <--- Nodo nodo1 SALE de (carga_17.dat)
+...
+
+----- DIFERIMIENTOS Ricart-Agrawala (muestra) -----
+[Ricart-Agrawala] nodo1 DIFIERE a nodo2
+[Ricart-Agrawala] nodo1 DIFIERE a nodo3
+[Ricart-Agrawala] nodo1 DIFIERE a nodo2
+[Ricart-Agrawala] nodo1 DIFIERE a nodo2
+[Ricart-Agrawala] nodo1 DIFIERE a nodo3
+
+----- DETECCIÓN DE FALLA (membresía reconfigurada) -----
+[Métricas] nodo1 | mensajes coordinación (Ricart-Agrawala) = 25558 | heartbeats enviados = 199 | reloj Lamport = 104888 | nodos vivos = [nodo3]
+[Métricas] nodo3 | mensajes coordinación (Ricart-Agrawala) = 25632 | heartbeats enviados = 201 | reloj Lamport = 104886 | nodos vivos = [nodo1]
+
+----- RESUMEN DE MÉTRICAS DEL GENERADOR -----
+==================== RESULTADOS DE LA PRUEBA DE TRÁFICO ====================
+Hilos concurrentes:        50
+Duración objetivo:         60 s (real: 60.1 s)
+Operaciones exitosas:      25838
+Operaciones con error:     0
+Throughput:                429.68 ops/seg
+Latencia promedio:         115.55 ms
+Latencia mediana (p50):    97 ms
+Latencia p95:              149 ms
+Latencia máxima:           3137 ms
+Tasa de error:             0.00 %
+Nota: la cantidad de mensajes de coordinación (Ricart-Agrawala) y de
+heartbeats se obtiene de las líneas [Métricas] / [Métricas-FINAL] de cada nodo.
+===========================================================================
